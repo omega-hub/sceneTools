@@ -1,16 +1,12 @@
 import maya.cmds as cmds
+import maya.mel as mel
 import subprocess
+import os
+from mcsend import *
 selectedObject = None
 
 # Path to the omegalib binary directory on the system (where orun and olaunch live) 
 omegalibPath = "D:/Workspace/omegalib/build/bin/release/"
-
-# Name of the script to start when launching an application
-scriptName = "cyclops/examples/python/spincube.py"
-
-# When set to true, the application will run using the remote application
-# launcher (olauncher)
-remoteRun = False
 
 # The target execution machine, when launching an application in remote mode
 targetMachine = "localhost"
@@ -22,34 +18,116 @@ targetMachine = "localhost"
 # where [X} is the scene module name. We use 'scene' as a default scene module name
 sceneModuleName = "scene"
 
+runningRemote = False
+
+# Load saved options if available
+if(cmds.optionVar(exists='omegalibPath')):
+    omegalibPath = cmds.optionVar(q='omegalibPath')
+if(cmds.optionVar(exists='targetMachine')):
+    targetMachine = cmds.optionVar(q='targetMachine')
+if(cmds.optionVar(exists='sceneModuleName')):
+    sceneModuleName = cmds.optionVar(q='sceneModuleName')
+
+
 #------------------------------------------------------------------------------
 # Build and run button clicked
 def onRunButtonClick(e):
-    subprocess.Popen(omegalibPath + "orun -s cyclops/examples/python/spincube.py")
+    projectPath = cmds.file(sceneName=True, query=True)
+    projectFile = os.path.basename(projectPath)
+    projectPath = os.path.dirname(projectPath)
+    
+    # entry script name = maya file name
+    scriptName = projectFile[:-3] + '.py'
+    
+    #export the current scene to fbx.
+    mel.eval('FBXExport -f "'+projectPath + '/' + projectFile[:-3]+'".fbx')
+    
+    command = '{0}/orun -s {1}/{2}'.format(omegalibPath, projectPath, scriptName)
+    runningRemote = False
+    subprocess.Popen(command)
+
+#------------------------------------------------------------------------------
+# Build and run button clicked
+def onRunRemoteButtonClick(e):
+    global targetMachine
+    global runningRemote
+    
+    projectPath = cmds.file(sceneName=True, query=True)
+    projectFile = os.path.basename(projectPath)
+    projectPath = os.path.dirname(projectPath)
+    
+    # entry script name = maya file name
+    scriptName = projectFile[:-3] + '.py'
+    
+    #export the current scene to fbx.
+    mel.eval('FBXExport -f "'+projectPath + '/' + projectFile[:-3]+'".fbx')
+    
+    command = '{0}/olauncher -s {1} -h {2}'.format(omegalibPath, scriptName, targetMachine)
+    runningRemote = True
+    subprocess.Popen(command, cwd=projectPath)
 
 #------------------------------------------------------------------------------
 # Application stop button clicked
 def onStopButtonClick(e):
-    connect(targetMachine)
+    global runningRemote
+    if(runningRemote):
+        connect(targetMachine)
+    else:
+        connect('localhost')
     sendCommand('oexit()')
     bye()
     
 #------------------------------------------------------------------------------
+# Omegalib path set button click
+def onOmegalibPathButtonClick():
+    p = cmds.fileDialog2(fileMode=3)
+    global omegalibPathBox
+    cmds.textFieldButtonGrp(omegalibPathBox, edit=True, text=p[0])
+    
+#------------------------------------------------------------------------------
+def onOkButtonClick(e):
+    # Save options
+    global omegalibPath
+    global sceneModuleName
+    global targetMachine
+    
+    omegalibPath = cmds.textFieldButtonGrp(omegalibPathBox, query=True, text=True)
+    sceneModuleName = cmds.textFieldGrp(sceneModuleBox, query=True, text=True)
+    targetMachine = cmds.textFieldGrp(targetMachineBox, query=True, text=True)
+    cmds.optionVar(stringValue=('omegalibPath', omegalibPath))
+    cmds.optionVar(stringValue=('sceneModuleName', sceneModuleName))
+    cmds.optionVar(stringValue=('targetMachine', targetMachine))
+    cmds.deleteUI("omegaSceneConnectWindow")
+
+#------------------------------------------------------------------------------
+def onCancelButtonClick(e):
+    cmds.deleteUI("omegaSceneConnectWindow")
+
+#------------------------------------------------------------------------------
 # Create the SceneConnect GUI
 def showSceneConnectUI():
         # delete window if already exists
-        if cmds.window("omegaSceneConnect", exists=True):
-            cmds.deleteUI("omegaSceneConnect")
+        if cmds.window("omegaSceneConnectWindow", exists=True):
+            cmds.deleteUI("omegaSceneConnectWindow")
         
-        window = cmds.window("omegaSceneConnect", title = "Omegalib SceneConnect", w=300, h=300, mnb=False,mxb=False)
+        window = cmds.window("omegaSceneConnectWindow", w=300, h=200, title = "Omegalib SceneConnect", mnb=False,mxb=False)
+        
+        layout = cmds.columnLayout(adjustableColumn=True)
+        
+        global omegalibPathBox
+        omegalibPathBox = cmds.textFieldButtonGrp(label="Omegalib Path:", text=omegalibPath, buttonLabel="...", adjustableColumn=2, buttonCommand=onOmegalibPathButtonClick)
+        
+        global targetMachineBox
+        targetMachineBox = cmds.textFieldGrp(label="Target Machine:", text=targetMachine, adjustableColumn=2)
+        
+        global sceneModuleBox
+        sceneModuleBox = cmds.textFieldGrp(label="Scene Module Name:", text = sceneModuleName, adjustableColumn=2)
+        
+        cmds.rowLayout(numberOfColumns=3, adjustableColumn=1)
+        cmds.separator(style='none')
+        cmds.button(label='Ok', command=onOkButtonClick)
+        cmds.button(label='Cancel', command=onCancelButtonClick)
         cmds.showWindow(window)
-        
-        mainLayout = cmds.columnLayout(w=300,h=300)
-        omegaPathText = cmds.textField(annotation="Omegalib Path:")
-        
-        runButton = cmds.button(label='Build and Run', w=300, h=50, command=onRunButtonClick)
-        stopButton = cmds.button(label='Stop', w=300, h=50, command=onStopButtonClick)
-
 
 #------------------------------------------------------------------------------
 # handle translation events
@@ -90,7 +168,7 @@ def onSelectionChanged():
     global rotateXJobId
     global rotateYJobId
     global rotateZJobId
-    
+    print('here')
     sel = cmds.ls(selection=True)
     print(sel)
     
@@ -105,10 +183,12 @@ def onSelectionChanged():
     
     # on new selection, connect to client
     if(len(sel) > 0 and selectedObject == None):
+        print("PORTCO DIO")
         connect(targetMachine)
     
     # if selection has cleared, disconnect from client
     if(len(sel) == 0 and selectedObject != None):
+        print("PORTCO DIO")
         bye()
     
     if(len(sel) > 0):
@@ -127,3 +207,4 @@ def onSelectionChanged():
 # initialize the script
 cmds.scriptJob(killAll=True)
 cmds.scriptJob(event=["SelectionChanged", onSelectionChanged])
+
