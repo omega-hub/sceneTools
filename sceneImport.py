@@ -7,7 +7,7 @@ root = None
 objects = OBJS()
 
 
-def importFile(filename, callerGlobals):
+def importFile(filename, callerGlobals, optimize=False):
     global model
     global root
     
@@ -15,6 +15,7 @@ def importFile(filename, callerGlobals):
     model = ModelInfo()
     model.name = "scene"
     model.path = filename
+    model.optimize = optimize
     getSceneManager().loadModel(model)
 
     # Create a scene object using the loaded model
