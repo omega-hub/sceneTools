@@ -40,6 +40,7 @@ def _traverse(path, lastChild, callerGlobals):
                    cmd = args[1] + '(objects.' + args[0] + ')'
                    #print('calling ' + cmd)
                    eval(cmd, callerGlobals, globals())
+                continue
             # recurse traversal
             childpath = path + p + '/'
             _traverse(childpath, p, callerGlobals)
