@@ -12,7 +12,6 @@ s = None
 def connect(host = 'localhost', port = 22500):
     global s
     if(s == None):
-        print('connecing')
         s = socket.socket()
         s.settimeout(2)
         s.connect((host, port))
@@ -47,14 +46,18 @@ def sendCommand(command):
 def bye():
     global s
     if(s != None):
-        send("bye!", 4)
         l32bit = struct.pack('i', 0)
         send(l32bit, 4)
-        print('sent bye waiting for world to end')
         while True:
-            v = s.recv(20)
-            print('recv')
-            if not v:
+            try:
+                v = s.recv(20)
+                if not v:
+                    s.close()
+                    s = None
+                    print('disconnected')
+                    return
+            except Exception:
                 s.close()
                 s = None
+                print('disconnected')
                 return

@@ -20,6 +20,10 @@ sceneModuleName = "scene"
 
 runningRemote = False
 
+# set to true when we are running the current
+# scene in omegalib.
+running = False
+
 # Load saved options if available
 if(cmds.optionVar(exists='omegalibPath')):
     omegalibPath = cmds.optionVar(q='omegalibPath')
@@ -32,6 +36,8 @@ if(cmds.optionVar(exists='sceneModuleName')):
 #------------------------------------------------------------------------------
 # Build and run button clicked
 def onRunButtonClick(e):
+    global runningRemote
+    global running
     projectPath = cmds.file(sceneName=True, query=True)
     projectFile = os.path.basename(projectPath)
     projectPath = os.path.dirname(projectPath)
@@ -44,6 +50,7 @@ def onRunButtonClick(e):
     
     command = '{0}/orun -s {1}/{2}'.format(omegalibPath, projectPath, scriptName)
     runningRemote = False
+    running = True
     subprocess.Popen(command)
 
 #------------------------------------------------------------------------------
@@ -63,6 +70,9 @@ def onRunRemoteButtonClick(e):
     mel.eval('FBXExport -f "'+projectPath + '/' + projectFile[:-3]+'".fbx')
     
     command = '{0}/olauncher -s {1} -h {2}'.format(omegalibPath, scriptName, targetMachine)
+    global runningRemote
+    global running
+    running = True
     runningRemote = True
     subprocess.Popen(command, cwd=projectPath)
 
@@ -70,12 +80,14 @@ def onRunRemoteButtonClick(e):
 # Application stop button clicked
 def onStopButtonClick(e):
     global runningRemote
+    global running
     if(runningRemote):
         connect(targetMachine)
     else:
         connect('localhost')
     sendCommand('oexit()')
     bye()
+    running = False
     
 #------------------------------------------------------------------------------
 # Omegalib path set button click
@@ -157,6 +169,43 @@ def onRotate():
         print('Rotating ' + objname + 'to ' + str((x, y, z)))
         sendCommand('scene.objects.' + objname + '.setOrientation(quaternionFromEulerDeg' + str((x, y, z)) + ')')
 
+#------------------------------------------------------------------------------
+# handle node name change events
+def onNodeNameChange():
+    global selectedObject
+    oldSelectedObject = selectedObject
+    selectedObject = cmds.ls(selection=True)
+    selectedObject = selectedObject[0]
+    if(selectedObject.startswith('o_')):
+        args = selectedObject[2:].split('_')
+        print('args ' + str(len(args)))
+        if(len(args) == 2):
+            objname = args[0]
+            className = args[1]
+            
+            oldargs = selectedObject[2:].split('_')
+            if(len(oldargs) == 2):
+                oldobjname = args[0]
+                oldclassName = args[1]
+                # delete old label
+                if(cmds.objExists(oldobjname + '_label')):
+                    cmds.delete(oldobjname + '_label')
+            
+            x = cmds.getAttr(selectedObject + '.translateX')
+            y = cmds.getAttr(selectedObject + '.translateY')
+            z = cmds.getAttr(selectedObject + '.translateZ')
+            a = cmds.annotate(selectedObject, point=(x,y + 1,z), text=className)
+            a = cmds.rename(a, objname + '_label')
+            cmds.parent(a, selectedObject, shape=True)
+            
+            # color this object wireframe differently
+            cmds.color(selectedObject, userDefined = 1)
+            cmds.color(a, userDefined = 1)
+            
+            # After creating the annotation, it will be selected.
+            # re-select the original object
+            cmds.select(selectedObject)
+        
         
 #------------------------------------------------------------------------------
 # selection changed handler: rewire event handlers on selection change 
@@ -168,40 +217,54 @@ def onSelectionChanged():
     global rotateXJobId
     global rotateYJobId
     global rotateZJobId
-    print('here')
+    global nameChangeJobId
+    global running
+    
     sel = cmds.ls(selection=True)
-    print(sel)
     
-    # kill old event handlers
-    if(selectedObject != None):
-        cmds.scriptJob(kill=translateXJobId)
-        cmds.scriptJob(kill=translateYJobId)
-        cmds.scriptJob(kill=translateZJobId)
-        cmds.scriptJob(kill=rotateXJobId)
-        cmds.scriptJob(kill=rotateYJobId)
-        cmds.scriptJob(kill=rotateZJobId)
-    
-    # on new selection, connect to client
-    if(len(sel) > 0 and selectedObject == None):
-        print("PORTCO DIO")
-        connect(targetMachine)
-    
-    # if selection has cleared, disconnect from client
-    if(len(sel) == 0 and selectedObject != None):
-        print("PORTCO DIO")
-        bye()
-    
-    if(len(sel) > 0):
-        selectedObject = sel[0]
-        translateXJobId = cmds.scriptJob(attributeChange=[selectedObject + ".translateX", onTranslate])
-        translateYJobId = cmds.scriptJob(attributeChange=[selectedObject + ".translateY", onTranslate])
-        translateZJobId = cmds.scriptJob(attributeChange=[selectedObject + ".translateZ", onTranslate])
-        rotateXJobId = cmds.scriptJob(attributeChange=[selectedObject + ".rotateX", onRotate])
-        rotateYJobId = cmds.scriptJob(attributeChange=[selectedObject + ".rotateY", onRotate])
-        rotateZJobId = cmds.scriptJob(attributeChange=[selectedObject + ".rotateZ", onRotate])
-        print('sel changed ' + selectedObject)
+    if(not running):
+        # NOTE: name change handler is processed even when maya is not connected
+        # to a running omegalib application.
+        # kill old event handlers
+        if(selectedObject != None):
+            cmds.scriptJob(kill=nameChangeJobId)
+        if(len(sel) > 0):
+            selectedObject = sel[0]
+            nameChangeJobId = cmds.scriptJob(nodeNameChanged=[selectedObject, onNodeNameChange])
+        else:
+           selectedObject = None
     else:
-       selectedObject = None
+        # kill old event handlers
+        if(selectedObject != None):
+            cmds.scriptJob(kill=translateXJobId)
+            cmds.scriptJob(kill=translateYJobId)
+            cmds.scriptJob(kill=translateZJobId)
+            cmds.scriptJob(kill=rotateXJobId)
+            cmds.scriptJob(kill=rotateYJobId)
+            cmds.scriptJob(kill=rotateZJobId)
+            cmds.scriptJob(kill=nameChangeJobId)
+        
+        # on new selection, connect to client
+        if(len(sel) > 0 and selectedObject == None):
+            print('connecting')
+            connect(targetMachine)
+        
+        # if selection has cleared, disconnect from client
+        if(len(sel) == 0 and selectedObject != None):
+            print('disconnecting')
+            bye()
+        
+        if(len(sel) > 0):
+            selectedObject = sel[0]
+            translateXJobId = cmds.scriptJob(attributeChange=[selectedObject + ".translateX", onTranslate])
+            translateYJobId = cmds.scriptJob(attributeChange=[selectedObject + ".translateY", onTranslate])
+            translateZJobId = cmds.scriptJob(attributeChange=[selectedObject + ".translateZ", onTranslate])
+            rotateXJobId = cmds.scriptJob(attributeChange=[selectedObject + ".rotateX", onRotate])
+            rotateYJobId = cmds.scriptJob(attributeChange=[selectedObject + ".rotateY", onRotate])
+            rotateZJobId = cmds.scriptJob(attributeChange=[selectedObject + ".rotateZ", onRotate])
+            nameChangeJobId = cmds.scriptJob(nodeNameChanged=[selectedObject, onNodeNameChange])
+        else:
+           selectedObject = None
     
 #------------------------------------------------------------------------------
 # initialize the script
