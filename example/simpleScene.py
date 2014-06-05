@@ -15,6 +15,10 @@ def SpotLight(node):
     sm.setSoft(True)
     light.setShadow(sm)
 
+def ground(node):
+    node.setEffect('textured -d lightMap/baked-initialShadingGroup-o_pPlane1_groundo_pPlane1_groundShape.jpg')
+    node.getMaterial().setColor(Color('white'), Color('black'))
+    
 scene.importFile("simpleScene.fbx", globals())
 
 scene.root.setScale(0.2, 0.2, 0.2)
